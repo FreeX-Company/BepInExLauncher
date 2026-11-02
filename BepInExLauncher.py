@@ -1,4 +1,3 @@
-
 import os
 import sys
 import zipfile
@@ -35,9 +34,14 @@ class BepInExLauncherApp:
         self.icon_image_ref = None
         self.available_repo_games = []
         self.last_mods_state = set()
+        self.available_exes = []
 
         self.apply_light_theme()
+        
+        # Сканируем доступные .exe файлы в папке
+        self.scan_available_exes()
         self.game_exe_path = self.auto_detect_game_exe()
+        
         if self.game_exe_path:
             self.game_folder_name = Path(self.game_exe_path).stem
 
@@ -53,7 +57,6 @@ class BepInExLauncherApp:
 
     def set_window_icon(self):
         try:
-            # Ищем icon.ico или icon.png рядом с программой
             icon_path = Path("icon.ico")
             if not icon_path.exists():
                 icon_path = Path("icon.png")
@@ -93,20 +96,27 @@ class BepInExLauncherApp:
         
         self.root.configure(bg=bg)
 
-    def auto_detect_game_exe(self):
+    def scan_available_exes(self):
         cwd = Path(os.getcwd())
         exes = list(cwd.glob("*.exe"))
+        self.available_exes = [str(e.name) for e in exes]
+
+    def auto_detect_game_exe(self):
+        if not self.available_exes:
+            return ""
         
+        cwd = Path(os.getcwd())
         ignored_keywords = ["unity", "crash", "install", "unins", "setup"]
+        
         valid_exes = [
-            e for e in exes 
-            if not any(kw in e.name.lower() for kw in ignored_keywords)
+            e for e in self.available_exes 
+            if not any(kw in e.lower() for kw in ignored_keywords)
         ]
         
         if valid_exes:
-            return str(valid_exes[0])
-        elif exes:
-            return str(exes[0])
+            return str(cwd / valid_exes[0])
+        elif self.available_exes:
+            return str(cwd / self.available_exes[0])
         return ""
 
     def create_widgets(self):
@@ -125,11 +135,40 @@ class BepInExLauncherApp:
         bottom_frame = ttk.Frame(self.root, padding=10)
         bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
 
+        # Выбор EXE файла рядом с кнопкой запуска
+        exe_select_frame = ttk.Frame(bottom_frame)
+        exe_select_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+
+        ttk.Label(exe_select_frame, text="EXE игры:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.exe_combo = ttk.Combobox(exe_select_frame, state="readonly", values=self.available_exes)
+        self.exe_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        if self.game_exe_path:
+            self.exe_combo.set(Path(self.game_exe_path).name)
+        elif self.available_exes:
+            self.exe_combo.set(self.available_exes[0])
+            
+        self.exe_combo.bind("<<ComboboxSelected>>", self.on_exe_selected)
+
         launch_btn = ttk.Button(bottom_frame, text="Запустить игру", command=self.launch_game)
         launch_btn.pack(side=tk.RIGHT)
 
         if self.game_folder_name:
             self.load_repo_games()
+
+    def on_exe_selected(self, event):
+        selected_filename = self.exe_combo.get()
+        if selected_filename:
+            cwd = Path(os.getcwd())
+            new_path = cwd / selected_filename
+            if new_path.exists():
+                self.game_exe_path = str(new_path)
+                self.game_folder_name = Path(self.game_exe_path).stem
+                
+                # Переинициализируем BepInEx и загружаем моды для выбранного экзешника
+                self.check_and_init_bepinex()
+                self.load_repo_games()
 
     def create_local_mods_widgets(self):
         canvas_frame = ttk.LabelFrame(self.tab_mods, text="Активные моды")
@@ -236,8 +275,8 @@ class BepInExLauncherApp:
         frame = ttk.Frame(dialog)
         frame.pack(padx=20, anchor="w")
 
-        ttk.Radiobutton(frame, text="64-bit (x64 - большинство современных игр)", variable=arch_var, value="x64").pack(anchor="w", pady=3)
-        ttk.Radiobutton(frame, text="32-bit (x86 - старые игры)", variable=arch_var, value="x86").pack(anchor="w", pady=3)
+        ttk.Radiobutton(frame, text="64-bit", variable=arch_var, value="x64").pack(anchor="w", pady=3)
+        ttk.Radiobutton(frame, text="32-bit", variable=arch_var, value="x86").pack(anchor="w", pady=3)
 
         result = {"arch": "x64"}
 
